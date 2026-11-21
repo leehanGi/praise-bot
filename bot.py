@@ -45,7 +45,7 @@ except Exception as e:
 TEAM, NAME, PHOTO_NUM, REASON = range(4)
 
 # 선택 가능한 팀 목록
-TEAM_CHOICES = [["1팀", "2팀"], ["3팀", "4팀"], ["청년부", "기타"]]
+TEAM_CHOICES = [["주일찬양대", "관현악"], ["수정찬", "수저찬"], ["찬양단", ""]]
 
 # /start 명령어: 첫 번째 단계(팀 선택)로 진입
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -62,7 +62,7 @@ async def select_team(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['team'] = update.message.text
     await update.message.reply_text(
         f"선택하신 팀: {update.message.text}\n\n"
-        "출품하시는 분의 **[성함]**을 입력해 주세요.",
+        "신청하시는 분의 **[성함]**을 입력해 주세요.",
         reply_markup=ReplyKeyboardRemove(),
         parse_mode="Markdown"
     )
@@ -72,7 +72,7 @@ async def select_team(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def input_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['name'] = update.message.text
     await update.message.reply_text(
-        "출품하실 **[사진 번호]**(또는 작품 번호)를 입력해 주세요."
+        "신청하실 **[사진 번호]**를 입력해 주세요. ex) 1/2/3/4"
     )
     return PHOTO_NUM
 
