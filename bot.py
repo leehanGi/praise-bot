@@ -1,4 +1,5 @@
 import os
+import re
 import logging
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import (
@@ -47,6 +48,14 @@ TEAM, NAME, PHOTO_NUM, REASON = range(4)
 # 선택 가능한 팀 목록
 TEAM_CHOICES = [["주일찬양대", "관현악"], ["수정찬", "수저찬"], ["찬양단", ""]]
 
+# 사진 번호 문자열을 분리해 리스트로 반환 (예: "1,2,3,4", "1 2 3 4", "1/2/3/4")
+def parse_photo_numbers(raw_text: str):
+    parts = [p.strip() for p in re.split(r"[/,\s]+", raw_text.strip()) if p.strip()]
+    parsed = []
+    for p in parts:
+        parsed.append(int(p) if p.isdigit() else p)
+    return parsed if parsed else [raw_text.strip()]
+
 # /start 명령어: 첫 번째 단계(팀 선택)로 진입
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = ReplyKeyboardMarkup(TEAM_CHOICES, one_time_keyboard=True, resize_keyboard=True)
@@ -72,7 +81,7 @@ async def select_team(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def input_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['name'] = update.message.text
     await update.message.reply_text(
-        "신청하실 **[사진 번호]**를 입력해 주세요. ex) 1/2/3/4"
+        "신청하실 **[사진 번호]**를 입력해 주세요. ex) 1,2,3,4"
     )
     return PHOTO_NUM
 
@@ -84,54 +93,17 @@ async def input_photo_num(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return REASON
 
-# 4단계: 이유 저장 후 -> 구글 시트 최종 저장 및 완료 메시지
+# 4단계: 이유 저장 후 -> 구글 시트 최종 저장(사진 번호당 1행) 및 완료 메시지
 async def input_reason(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reason = update.message.text
     user_data = context.user_data
     
     team = user_data.get('team')
     name = user_data.get('name')
-    photo_num = user_data.get('photo_num')
+    raw_photo_num = user_data.get('photo_num', "")
+    photo_list = parse_photo_numbers(raw_photo_num)
     
     try:
-        # 구글 시트에 행 추가 [팀, 이름, 사진번호, 고른 이유]
-        sheet.append_row([team, name, photo_num, reason])
-    except Exception as e:
-        print(f"🚨 구글 시트 데이터 저장 중 에러 발생: {e}")
-    
-    await update.message.reply_text(
-        "🎉 찬양부 사진전 접수가 완벽하게 완료되었습니다!\n"
-        "소중한 참여 감사합니다. 🙏"
-    )
-    
-    return ConversationHandler.END
-
-# 취소 명령어
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("접수가 취소되었습니다. 다시 시작하려면 /start를 눌러주세요.", reply_markup=ReplyKeyboardRemove())
-    return ConversationHandler.END
-
-if __name__ == '__main__':
-    try:
-        if not TOKEN:
-            raise ValueError("BOT_TOKEN 환경 변수가 설정되지 않았습니다.")
-
-        application = ApplicationBuilder().token(TOKEN).build()
-        
-        conv_handler = ConversationHandler(
-            entry_points=[CommandHandler('start', start)],
-            states={
-                TEAM: [MessageHandler(filters.TEXT & (~filters.COMMAND), select_team)],
-                NAME: [MessageHandler(filters.TEXT & (~filters.COMMAND), input_name)],
-                PHOTO_NUM: [MessageHandler(filters.TEXT & (~filters.COMMAND), input_photo_num)],
-                REASON: [MessageHandler(filters.TEXT & (~filters.COMMAND), input_reason)],
-            },
-            fallbacks=[CommandHandler('cancel', cancel)],
-        )
-        
-        application.add_handler(conv_handler)
-        
-        print("단계별 접수 봇이 성공적으로 실행되었습니다...")
-        application.run_polling()
-    except Exception as e:
-        print("🚨 봇 실행 중 치명적인 에러 발생:", e)
+        # 사진 번호 1개당 1행씩 세로로 추가 [팀, 이름, 사진번호, 고른 이유]
+        rows = [[team, name, p_num, reason] for p_num in photo_list]
+        sheet.append_rows(rows, value_input_option="USER_ENTERED
