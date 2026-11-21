@@ -97,13 +97,52 @@ async def input_photo_num(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def input_reason(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reason = update.message.text
     user_data = context.user_data
-    
+
     team = user_data.get('team')
     name = user_data.get('name')
     raw_photo_num = user_data.get('photo_num', "")
     photo_list = parse_photo_numbers(raw_photo_num)
-    
+
     try:
         # 사진 번호 1개당 1행씩 세로로 추가 [팀, 이름, 사진번호, 고른 이유]
         rows = [[team, name, p_num, reason] for p_num in photo_list]
-        sheet.append_rows(rows, value_input_option="USER_ENTERED
+        sheet.append_rows(rows, value_input_option="USER_ENTERED")
+    except Exception as e:
+        print(f"🚨 구글 시트 데이터 저장 중 에러 발생: {e}")
+
+    await update.message.reply_text(
+        f"🎉 찬양부 사진전 접수가 완벽하게 완료되었습니다! (총 {len(photo_list)}건 반영)\n"
+        "소중한 참여 감사합니다. 🙏"
+    )
+
+    return ConversationHandler.END
+
+# 취소 명령어
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("접수가 취소되었습니다. 다시 시작하려면 /start를 눌러주세요.", reply_markup=ReplyKeyboardRemove())
+    return ConversationHandler.END
+
+if __name__ == '__main__':
+    try:
+        if not TOKEN:
+            raise ValueError("BOT_TOKEN 환경 변수가 설정되지 않았습니다.")
+
+        application = ApplicationBuilder().token(TOKEN).build()
+
+        conv_handler = ConversationHandler(
+            entry_points=[CommandHandler('start', start)],
+            states={
+                TEAM: [MessageHandler(filters.TEXT & (~filters.COMMAND), select_team)],
+                NAME: [MessageHandler(filters.TEXT & (~filters.COMMAND), input_name)],
+                PHOTO_NUM: [MessageHandler(filters.TEXT & (~filters.COMMAND), input_photo_num)],
+                REASON: [MessageHandler(filters.TEXT & (~filters.COMMAND), input_reason)],
+            },
+            fallbacks=[CommandHandler('cancel', cancel)],
+        )
+
+        application.add_handler(conv_handler)
+
+        print("단계별 접수 봇이 성공적으로 실행되었습니다...")
+        application.run_polling()
+    except Exception as e:
+        print("🚨 봇 실행 중 치명적인 에러 발생:", e)
