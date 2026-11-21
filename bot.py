@@ -18,8 +18,8 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-# 1. 텔레그램 봇 토큰
-TOKEN = "9270590938:AAGTKD8m2hRL9an7NTziGlPIWopux3KCZZ0"
+# 1. 텔레그램 봇 토큰 (Railway Variables의 BOT_TOKEN에서 불러옴)
+TOKEN = os.environ.get("BOT_TOKEN")
 
 # 2. 구글 인증 정보 및 시트 연동 설정
 try:
@@ -113,6 +113,9 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 if __name__ == '__main__':
     try:
+        if not TOKEN:
+            raise ValueError("BOT_TOKEN 환경 변수가 설정되지 않았습니다.")
+
         application = ApplicationBuilder().token(TOKEN).build()
         
         conv_handler = ConversationHandler(
