@@ -100,7 +100,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         args = context.args or []
         if not args or args[0] != QR_ACCESS_CODE:
             await update.message.reply_text(
-                "현장에 비치된 전용 QR 코드를 스캔해 접속해 주세요.",
+                "현장에 비치된 전용 QR 코드를 통해 접속하고 재접속시 다시 코드를 스캔 해주세요.",
                 reply_markup=ReplyKeyboardRemove()
             )
             return ConversationHandler.END
