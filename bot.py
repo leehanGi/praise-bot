@@ -43,12 +43,16 @@ try:
 except Exception as e:
     print(f"🚨 구글 시트 연동 또는 인증 파일 에러 발생: {e}")
 
-# 대화 단계 정의 (팀 선택 -> 이름 -> 사진 번호 -> 이유)
-TEAM, NAME, PHOTO_NUM, REASON = range(4)
+# 대화 단계 정의 (팀 선택 -> 기타 세부팀 -> 이름 -> 사진 번호 -> 이유)
+TEAM, OTHER_TEAM, NAME, PHOTO_NUM, REASON = range(5)
 
-# 선택 가능한 팀 목록 및 뒤로가기 버튼 설정
+# 선택 가능한 팀 목록 및 '기타' 세부 팀 목록
 TEAM_CHOICES = [["주일찬양대", "관현악"], ["수정찬", "수저찬"], ["찬양단", "기타"]]
 VALID_TEAMS = {team for row in TEAM_CHOICES for team in row}
+
+OTHER_TEAM_CHOICES = [["작곡팀", "건반팀"], ["운영진", "⬅️ 뒤로가기"]]
+VALID_OTHER_TEAMS = {"작곡팀", "건반팀", "운영진"}
+
 BACK_BTN = "⬅️ 뒤로가기"
 BACK_KEYBOARD = ReplyKeyboardMarkup([[BACK_BTN]], resize_keyboard=True)
 
@@ -60,7 +64,7 @@ TEAM_START_COL = {
     "수정찬": 11,      # K~N열 (O열 공백)
     "수저찬": 16,      # P~S열 (T열 공백)
     "찬양단": 21,      # U~X열 (Y열 공백)
-    "기타": 26,        # Z~AC열
+    "기타": 26,        # Z~AC열 (시트 열 Z~AC 이상 확보 필요)
 }
 
 def col_to_letter(col_num: int) -> str:
@@ -77,7 +81,7 @@ def append_team_submission(ws, team: str, name: str, photo_list: list, reason: s
     - 첫 행: [팀, 이름, 첫 사진번호, 고른이유] 기록 + 4개 칸 전체 연한 노란색 강조
     - 이후 사진 행: [팀, 이름, 다음 사진번호, ""] 형태로 세로 추가
     """
-    start_col = TEAM_START_COL.get(team)
+    start_col = TEAM_START_COL["기타"] if team.startswith("기타") else TEAM_START_COL.get(team)
     if not start_col:
         raise ValueError(f"등록되지 않은 팀입니다: {team}")
 
@@ -181,6 +185,16 @@ async def ask_team(update: Update):
     )
     return TEAM
 
+async def ask_other_team(update: Update):
+    reply_markup = ReplyKeyboardMarkup(OTHER_TEAM_CHOICES, resize_keyboard=True)
+    await update.message.reply_text(
+        "선택하신 팀: *기타*\n\n"
+        "구체적인 팀을 아래 버튼에서 선택해 주세요!",
+        reply_markup=reply_markup,
+        parse_mode="Markdown"
+    )
+    return OTHER_TEAM
+
 async def ask_name(update: Update, team: str):
     await update.message.reply_text(
         f"선택하신 팀: *{team}*\n\n"
@@ -216,7 +230,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     return await ask_team(update)
 
-# 1단계: 팀 저장 후 -> 이름 묻기
+# 1단계: 팀 저장 후 -> '기타'면 세부 팀 버튼 표시, 아니면 바로 이름 묻기
 async def select_team(update: Update, context: ContextTypes.DEFAULT_TYPE):
     team = update.message.text.strip()
     if team not in VALID_TEAMS:
@@ -228,13 +242,38 @@ async def select_team(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return TEAM
 
+    context.user_data['base_team'] = team
+    if team == "기타":
+        return await ask_other_team(update)
+
     context.user_data['team'] = team
     return await ask_name(update, team)
+
+# 1-1단계: '기타' 세부 팀 선택 후 -> 이름 묻기
+async def select_other_team(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    if text == BACK_BTN:
+        return await ask_team(update)
+
+    if text not in VALID_OTHER_TEAMS:
+        reply_markup = ReplyKeyboardMarkup(OTHER_TEAM_CHOICES, resize_keyboard=True)
+        await update.message.reply_text(
+            "하단 버튼에서 *작곡팀*, *건반팀*, *운영진* 중 하나를 선택해 주세요!",
+            reply_markup=reply_markup,
+            parse_mode="Markdown"
+        )
+        return OTHER_TEAM
+
+    formatted_team = f"기타 ({text})"
+    context.user_data['team'] = formatted_team
+    return await ask_name(update, formatted_team)
 
 # 2단계: 이름 저장 후 -> 사진 번호 묻기
 async def input_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     if text == BACK_BTN:
+        if context.user_data.get('base_team') == "기타":
+            return await ask_other_team(update)
         return await ask_team(update)
 
     context.user_data['name'] = text
@@ -269,7 +308,13 @@ async def input_reason(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         append_team_submission(sheet, team, name, photo_list, reason)
     except Exception as e:
-        print(f"🚨 구글 시트 데이터 저장 중 에러 발생: {e}")
+        logging.exception("구글 시트 데이터 저장 중 에러 발생")
+        await update.message.reply_text(
+            f"⚠️ 시트 저장 중 문제가 발생했습니다.\n원인: `{e}`\n관리자에게 문의해 주세요.",
+            reply_markup=ReplyKeyboardRemove(),
+            parse_mode="Markdown"
+        )
+        return ConversationHandler.END
 
     await update.message.reply_text(
         f"🎉 찬양부 사진전 접수가 완벽하게 완료되었습니다! (총 {len(photo_list)}건 반영)\n"
@@ -299,6 +344,7 @@ if __name__ == '__main__':
             entry_points=[CommandHandler('start', start)],
             states={
                 TEAM: [MessageHandler(filters.TEXT & (~filters.COMMAND), select_team)],
+                OTHER_TEAM: [MessageHandler(filters.TEXT & (~filters.COMMAND), select_other_team)],
                 NAME: [MessageHandler(filters.TEXT & (~filters.COMMAND), input_name)],
                 PHOTO_NUM: [MessageHandler(filters.TEXT & (~filters.COMMAND), input_photo_num)],
                 REASON: [MessageHandler(filters.TEXT & (~filters.COMMAND), input_reason)],
