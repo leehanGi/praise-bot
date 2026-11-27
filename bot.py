@@ -122,12 +122,36 @@ def append_team_submission(ws, team: str, name: str, photo_list: list, reason: s
         )
 
 # 사진 번호 문자열을 분리해 리스트로 반환
-# 지원 예시: "1,2,3,4", "1 2 3 4", "1/2/3/4", "1-10", "1~10", "1-3, 7, 9~11"
+# 지원 예시:
+# - 일반 나열: "1, 2, 3", "1번 2번 3번"
+# - 연속 범위: "1-10", "1~10", "1번부터 10번"
+# - 동일 번호 수량: "100*10", "100x10", "100번 10장", "100 10장", "100(10장)"
 def parse_photo_numbers(raw_text: str):
-    parts = [p.strip() for p in re.split(r"[,\s/]+", raw_text.strip()) if p.strip()]
+    text = raw_text.strip()
+
+    # '1번부터 10번' 또는 '1부터 10' 형태를 '1-10'으로 미리 변환
+    text = re.sub(r"(\d+)\s*번?\s*부터\s*(\d+)\s*번?", r"\1-\2", text)
+
+    # '100번 10장', '100 10장', '100(10장)', '100-10장' 형태를 '100*10'으로 미리 변환
+    text = re.sub(r"(\d+)\s*(?:번|\(|-|\s)\s*(\d+)\s*장\)?", r"\1*\2", text)
+
+    # 뒤에 남은 단독 '번' 제거 (예: "1번, 2번" -> "1, 2")
+    text = re.sub(r"(\d+)\s*번", r"\1", text)
+
+    parts = [p.strip() for p in re.split(r"[,\s/]+", text) if p.strip()]
     parsed = []
 
     for p in parts:
+        # 1) 동일 번호 반복 ('100*10', '100x10')
+        repeat_match = re.fullmatch(r"(\d+)\s*[*xX×]\s*(\d+)", p)
+        if repeat_match:
+            photo_num = int(repeat_match.group(1))
+            count = int(repeat_match.group(2))
+            if count > 0:
+                parsed.extend([photo_num] * count)
+            continue
+
+        # 2) 연속 범위 ('1-10', '1~10')
         range_match = re.fullmatch(r"(\d+)\s*[-~～]\s*(\d+)", p)
         if range_match:
             start_num = int(range_match.group(1))
@@ -168,8 +192,9 @@ async def ask_name(update: Update, team: str):
 
 async def ask_photo_num(update: Update):
     await update.message.reply_text(
-        "신청하실 **[사진 번호]**를 입력해 주세요.\n"
-        "예시) `1,2,3,4`, `1 2 3 4`, `1-10`, `1~10`",
+        "신청하실 **[사진 번호]**를 입력해 주세요.\n\n"
+        "• 여러 장 고를 때: `1, 2, 3` 또는 `1번부터 10번`\n"
+        "• 같은 사진 여러 장: `100번 10장` (또는 `100*10`)",
         reply_markup=BACK_KEYBOARD,
         parse_mode="Markdown"
     )
