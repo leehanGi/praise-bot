@@ -121,12 +121,26 @@ def append_team_submission(ws, team: str, name: str, photo_list: list, reason: s
             value_input_option="USER_ENTERED"
         )
 
-# 사진 번호 문자열을 분리해 리스트로 반환 (예: "1,2,3,4", "1 2 3 4", "1/2/3/4")
+# 사진 번호 문자열을 분리해 리스트로 반환
+# 지원 예시: "1,2,3,4", "1 2 3 4", "1/2/3/4", "1-10", "1~10", "1-3, 7, 9~11"
 def parse_photo_numbers(raw_text: str):
-    parts = [p.strip() for p in re.split(r"[/,\s]+", raw_text.strip()) if p.strip()]
+    parts = [p.strip() for p in re.split(r"[,\s/]+", raw_text.strip()) if p.strip()]
     parsed = []
+
     for p in parts:
-        parsed.append(int(p) if p.isdigit() else p)
+        range_match = re.fullmatch(r"(\d+)\s*[-~～]\s*(\d+)", p)
+        if range_match:
+            start_num = int(range_match.group(1))
+            end_num = int(range_match.group(2))
+            if start_num <= end_num:
+                parsed.extend(range(start_num, end_num + 1))
+            else:
+                parsed.extend(range(start_num, end_num - 1, -1))
+        elif p.isdigit():
+            parsed.append(int(p))
+        else:
+            parsed.append(p)
+
     return parsed if parsed else [raw_text.strip()]
 
 # --- 단계별 질문 함수 (뒤로가기 시 재사용) ---
@@ -155,7 +169,7 @@ async def ask_name(update: Update, team: str):
 async def ask_photo_num(update: Update):
     await update.message.reply_text(
         "신청하실 **[사진 번호]**를 입력해 주세요.\n"
-        "예시) `1,2,3,4` 또는 `1 2 3 4`",
+        "예시) `1,2,3,4`, `1 2 3 4`, `1-10`, `1~10`",
         reply_markup=BACK_KEYBOARD,
         parse_mode="Markdown"
     )
