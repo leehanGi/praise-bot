@@ -52,6 +52,63 @@ VALID_TEAMS = {team for row in TEAM_CHOICES for team in row}
 BACK_BTN = "⬅️ 뒤로가기"
 BACK_KEYBOARD = ReplyKeyboardMarkup([[BACK_BTN]], resize_keyboard=True)
 
+# 각 팀 블록의 시작 열 번호 (1=A, 6=F, 11=K, 16=P, 21=U, 26=Z)
+# 블록 구성: [시작열: 팀, +1: 이름, +2: 사진번호, +3: 사진 고른이유], 이후 1열 공백
+TEAM_START_COL = {
+    "주일찬양대": 1,   # A~D열 (E열 공백)
+    "관현악": 6,       # F~I열 (J열 공백)
+    "수정찬": 11,      # K~N열 (O열 공백)
+    "수저찬": 16,      # P~S열 (T열 공백)
+    "찬양단": 21,      # U~X열 (Y열 공백)
+    "기타": 26,        # Z~AC열
+}
+
+def col_to_letter(col_num: int) -> str:
+    """1 -> 'A', 26 -> 'Z', 27 -> 'AA' 변환"""
+    result = ""
+    while col_num > 0:
+        col_num, remainder = divmod(col_num - 1, 26)
+        result = chr(65 + remainder) + result
+    return result
+
+def append_team_submission(ws, team: str, name: str, photo_list: list, reason: str):
+    """
+    해당 팀 블록의 '사진번호' 열(start_col + 2)을 기준으로 마지막 행을 찾은 뒤,
+    첫 번째 사진 행에만 [팀, 이름, 첫 사진번호, 고른이유]를 기록하고
+    이후 사진 번호들은 세로로 사진번호 열에만 기록합니다.
+    """
+    start_col = TEAM_START_COL.get(team)
+    if not start_col:
+        raise ValueError(f"등록되지 않은 팀입니다: {team}")
+
+    photo_col = start_col + 2
+    col_values = ws.col_values(photo_col)
+
+    # 1행은 헤더('사진번호')이므로 최소 2행부터 시작
+    next_row = max(len(col_values) + 1, 2)
+
+    first_photo = photo_list[0]
+    rest_photos = photo_list[1:]
+
+    # 첫 행: 팀, 이름, 첫 사진번호, 고른이유 한 번만 기록
+    start_letter = col_to_letter(start_col)
+    end_letter = col_to_letter(start_col + 3)
+    ws.update(
+        range_name=f"{start_letter}{next_row}:{end_letter}{next_row}",
+        values=[[team, name, first_photo, reason]],
+        value_input_option="USER_ENTERED"
+    )
+
+    # 두 번째 사진 번호부터는 해당 팀의 '사진번호' 열에만 세로로 추가
+    if rest_photos:
+        photo_col_letter = col_to_letter(photo_col)
+        end_photo_row = next_row + len(rest_photos)
+        ws.update(
+            range_name=f"{photo_col_letter}{next_row + 1}:{photo_col_letter}{end_photo_row}",
+            values=[[p] for p in rest_photos],
+            value_input_option="USER_ENTERED"
+        )
+
 # 사진 번호 문자열을 분리해 리스트로 반환 (예: "1,2,3,4", "1 2 3 4", "1/2/3/4")
 def parse_photo_numbers(raw_text: str):
     parts = [p.strip() for p in re.split(r"[/,\s]+", raw_text.strip()) if p.strip()]
@@ -100,7 +157,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         args = context.args or []
         if not args or args[0] != QR_ACCESS_CODE:
             await update.message.reply_text(
-                "현장에 비치된 전용 QR 코드를 통해 접속하고 재접속시 다시 코드를 스캔 해주세요.",
+                "현장에 비치된 전용 QR 코드를 스캔해 접속해 주세요.",
                 reply_markup=ReplyKeyboardRemove()
             )
             return ConversationHandler.END
@@ -146,7 +203,7 @@ async def input_photo_num(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return REASON
 
-# 4단계: 이유 저장 후 -> 구글 시트 최종 저장(사진 번호당 1행) 및 완료 메시지
+# 4단계: 이유 저장 후 -> 팀별 열 위치에 맞춰 구글 시트 저장 및 완료 메시지
 async def input_reason(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reason = update.message.text.strip()
     if reason == BACK_BTN:
@@ -159,9 +216,7 @@ async def input_reason(update: Update, context: ContextTypes.DEFAULT_TYPE):
     photo_list = parse_photo_numbers(raw_photo_num)
 
     try:
-        # 사진 번호 1개당 1행씩 세로로 추가 [팀, 이름, 사진번호, 고른 이유]
-        rows = [[team, name, p_num, reason] for p_num in photo_list]
-        sheet.append_rows(rows, value_input_option="USER_ENTERED")
+        append_team_submission(sheet, team, name, photo_list, reason)
     except Exception as e:
         print(f"🚨 구글 시트 데이터 저장 중 에러 발생: {e}")
 
@@ -176,7 +231,10 @@ async def input_reason(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # 취소 명령어
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
-    await update.message.reply_text("접수가 취소되었습니다. 다시 시작하려면 /start를 눌러주세요.", reply_markup=ReplyKeyboardRemove())
+    await update.message.reply_text(
+        "접수가 취소되었습니다. 다시 시작하려면 현장 QR 코드를 다시 스캔해 주세요.",
+        reply_markup=ReplyKeyboardRemove()
+    )
     return ConversationHandler.END
 
 if __name__ == '__main__':
