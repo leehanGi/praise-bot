@@ -73,39 +73,51 @@ def col_to_letter(col_num: int) -> str:
 
 def append_team_submission(ws, team: str, name: str, photo_list: list, reason: str):
     """
-    해당 팀 블록의 '사진번호' 열(start_col + 2)을 기준으로 마지막 행을 찾은 뒤,
-    첫 번째 사진 행에만 [팀, 이름, 첫 사진번호, 고른이유]를 기록하고
-    이후 사진 번호들은 세로로 사진번호 열에만 기록합니다.
+    해당 팀 블록(4개 열: 팀, 이름, 사진번호, 사진 고른이유)에서 마지막 행을 찾은 뒤,
+    - 첫 행: [팀, 이름, 첫 사진번호, 고른이유] 기록 + 4개 칸 전체 연한 노란색 강조
+    - 이후 사진 행: [팀, 이름, 다음 사진번호, ""] 형태로 세로 추가
     """
     start_col = TEAM_START_COL.get(team)
     if not start_col:
         raise ValueError(f"등록되지 않은 팀입니다: {team}")
 
-    photo_col = start_col + 2
-    col_values = ws.col_values(photo_col)
-
-    # 1행은 헤더('사진번호')이므로 최소 2행부터 시작
-    next_row = max(len(col_values) + 1, 2)
+    block_cols = [ws.col_values(c) for c in range(start_col, start_col + 4)]
+    max_len = max((len(col) for col in block_cols), default=1)
+    next_row = max(max_len + 1, 2)
 
     first_photo = photo_list[0]
     rest_photos = photo_list[1:]
 
-    # 첫 행: 팀, 이름, 첫 사진번호, 고른이유 한 번만 기록
     start_letter = col_to_letter(start_col)
     end_letter = col_to_letter(start_col + 3)
+    first_row_range = f"{start_letter}{next_row}:{end_letter}{next_row}"
+
+    # 1. 첫 번째 사진 행: 팀, 이름, 첫 사진번호, 고른이유 기록
     ws.update(
-        range_name=f"{start_letter}{next_row}:{end_letter}{next_row}",
+        range_name=first_row_range,
         values=[[team, name, first_photo, reason]],
         value_input_option="USER_ENTERED"
     )
 
-    # 두 번째 사진 번호부터는 해당 팀의 '사진번호' 열에만 세로로 추가
+    # 첫 번째 행 4개 필드(팀, 이름, 사진번호, 고른이유) 전체 노란색 배경 적용
+    ws.format(
+        first_row_range,
+        {
+            "backgroundColor": {
+                "red": 1.0,
+                "green": 0.96,
+                "blue": 0.6
+            }
+        }
+    )
+
+    # 2. 두 번째 사진 번호부터: 팀, 이름은 반복 기록하고 고른이유는 비움
     if rest_photos:
-        photo_col_letter = col_to_letter(photo_col)
-        end_photo_row = next_row + len(rest_photos)
+        extra_rows = [[team, name, p, ""] for p in rest_photos]
+        end_row = next_row + len(rest_photos)
         ws.update(
-            range_name=f"{photo_col_letter}{next_row + 1}:{photo_col_letter}{end_photo_row}",
-            values=[[p] for p in rest_photos],
+            range_name=f"{start_letter}{next_row + 1}:{end_letter}{end_row}",
+            values=extra_rows,
             value_input_option="USER_ENTERED"
         )
 
